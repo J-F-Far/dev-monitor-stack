@@ -1,0 +1,92 @@
+version: '3.6'
+
+volumes:
+  prometheus_data: {}
+  grafana_data: {}
+  timescale_data: {}
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.18.1
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=48h'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - 9090:9090
+    network_mode: "host"
+    restart: always
+
+  alertmanager:
+    image: prom/alertmanager
+    ports:
+      - 9093:9093
+        #volumes:
+        #- ./alertmanager/:/etc/alertmanager/
+    network_mode: "host"
+    restart: always
+    command:
+        #- '--config.file=/etc/alertmanager/config-alertmanager.yml'
+      - '--storage.path=/alertmanager'
+  
+  #Grafana 7.0 Beta version
+  grafana:
+    image: grafana/grafana:7.0.0-beta3
+    user: "472"
+    depends_on :
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+        #- ./grafana/:/etc/grafana/
+    network_mode: "host"
+    restart: always
+
+  #TimescaleDB (PostgreSQL with Prom extension)
+  timescaledb:
+    image: timescaledev/timescale_prometheus_extra:latest-pg12
+    command: -c synchronous_commit=OFF
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=example
+      - POSTGRES_DB=timescale
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    ports:
+      - 5432:5432
+    network_mode: "host"
+
+  timescaledb_prometheus_connector:
+    image: timescale/timescale-prometheus:latest  
+    command: '-log-level=debug'
+    ports:
+      - 9201:9201
+    depends_on:
+      - timescaledb
+    environment:
+      - TS_PROM_DB_HOST=localhost
+      - TS_PROM_DB_NAME=timescale
+      - TS_PROM_DB_USER=postgres
+      - TS_PROM_DB_PASSWORD=example
+    network_mode: "host"
+
+  postgres_exporter:
+    image: wrouesnel/postgres_exporter
+    ports:
+      - 9187:9187 
+    depends_on:
+      - prometheus
+      - timescaledb
+    network_mode: "host"
+     
